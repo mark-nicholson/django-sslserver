@@ -46,12 +46,17 @@ except ImportError:
 
 
 class SecureHTTPServer(ThreadedWSGIServer):
-    def __init__(self, address, handler_cls, certificate, key, ipv6=False):
+    def __init__(self, address, handler_cls, certificate, key, ca_certificate, ipv6=False):
         super(SecureHTTPServer, self).__init__(address, handler_cls, ipv6=ipv6)
+        if ca_certificate:
+            cert_reqs = ssl.CERT_OPTIONAL
+        else:
+            cert_reqs = ssl.CERT_NONE
         self.socket = ssl.wrap_socket(self.socket, certfile=certificate,
-                                      keyfile=key, server_side=True,
+                                      keyfile=key, ca_certs=ca_certificate,
+                                      server_side=True,
                                       ssl_version=_ssl_version,
-                                      cert_reqs=ssl.CERT_NONE)
+                                      cert_reqs=cert_reqs)
 
 
 class WSGIRequestHandler(WSGIRequestHandler):
@@ -85,6 +90,9 @@ class Command(runserver.Command):
                             default=os.path.join(default_ssl_files_dir(),
                                 "development.key"),
                             help="Path to the key file"),
+        parser.add_argument("--ca-certificate",
+                            default=None,
+                            help="Path to optional ca-certificate file"),
         parser.add_argument("--nostatic", dest='use_static_handler',
                             action='store_false', default=None,
                             help="Do not use internal static file handler"),
@@ -119,7 +127,7 @@ class Command(runserver.Command):
             return True
         return False
 
-    def check_certs(self, key_file, cert_file):
+    def check_certs(self, key_file, cert_file, ca_cert_file):
         # TODO: maybe validate these? wrap_socket doesn't...
 
         if not os.path.exists(key_file):
@@ -127,14 +135,18 @@ class Command(runserver.Command):
         if not os.path.exists(cert_file):
             raise CommandError("Can't find certificate at %s" %
                                cert_file)
-
+        if ca_cert_file and not os.path.exists(ca_cert_file):
+            raise CommandError(
+                "Can't find ca-certificate file at %s" % ca_cert_file
+            )
 
     def inner_run(self, *args, **options):
         # Django did a shitty job abstracting this.
 
         key_file = options.get("key")
         cert_file = options.get("certificate")
-        self.check_certs(key_file, cert_file)
+        ca_cert_file = options.get("ca_certificate")
+        self.check_certs(key_file, cert_file, ca_cert_file)
 
         from django.conf import settings
         from django.utils import translation
@@ -151,6 +163,7 @@ class Command(runserver.Command):
             "Starting development server at https://%(addr)s:%(port)s/\n"
             "Using SSL certificate: %(cert)s\n"
             "Using SSL key: %(key)s\n"
+            "Using CA certificate: %(ca_cert)s\n"
             "Quit the server with %(quit_command)s.\n"
         ) % {
             "started_at": datetime.now().strftime('%B %d, %Y - %X'),
@@ -160,7 +173,8 @@ class Command(runserver.Command):
             "port": self.port,
             "quit_command": quit_command,
             "cert": cert_file,
-            "key": key_file
+            "key": key_file,
+            "ca_cert": ca_cert_file if ca_cert_file is not None else "no trusted CA certificate specified"
         })
         # django.core.management.base forces the locale to en-us. We should
         # set it up correctly for the first request (particularly important
@@ -171,7 +185,8 @@ class Command(runserver.Command):
             handler = self.get_handler(*args, **options)
             server = SecureHTTPServer((self.addr, int(self.port)),
                                       WSGIRequestHandler,
-                                      cert_file, key_file, ipv6=self.use_ipv6)
+                                      cert_file, key_file, ca_cert_file,
+                                      ipv6=self.use_ipv6)
             server.set_app(handler)
             server.serve_forever()
 

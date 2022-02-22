@@ -66,6 +66,10 @@ you can tell Django SSL Server to use it with the following arguments::
 
   $ python manage.py runsslserver --certificate /path/to/certificate.crt --key /path/to/key.key
 
+**Option 3**: Add in a ca-certificate file that provides the chain of certificates needed to fully verify the certificate.  This will allow clients such as ``curl`` to run without the ``-k`` option required and fully authenticate against the certificate chain::
+
+  $ python manage.py runsslserver --certificate /path/to/certificate.crt --key /path/to/key.key --ca-certificate /path/to/ca-certificate.crt
+
 
 Third-Party Static File Handlers
 ================================
